@@ -1,27 +1,30 @@
 breed [ farmers farmer ]
-farmers-own [ land-size wealth crop-stage crop-quality available-water required-water ]
-globals [ total-land farmer-order crop-water-req ]
+farmers-own [ land-size wealth crop-stage crop-quality available-water required-water friendliness connections social-credit ]
+globals [ total-land farmer-order crop-water-req week season total-flow  ]
 
 to setup
   clear-all
   reset-ticks
   setup-patches
   setup-farmers
-  set crop-water-req [ ; requirement for rice: each stage lasts multiple weeks, hence the repeating values
-    0.6 0.6 0.6
+  set week 1
+  set season "rabi"
+  set total-flow base-flow
+  set crop-water-req [
+    0.6 0.6 0.6   ; requirement for rice: each stage lasts multiple weeks, hence the repeating values
     0.8 0.8 0.8
     1.5 1.5 1.5 1.5 1.5
     0.5 0.5
     0.3 0.3
     0.5 0.5
     1.1 1.1 1.1 1.1
-    0.2 0.2]
+    0.2 0.2
+  ]
   update-land
-  ;foreach farmer-order [ x -> show [ycor] of x ]
 end
 
 to setup-patches
-  ask patches with [pxcor = min-pxcor] [ set pcolor blue ]
+  ask patches with [pxcor = min-pxcor] [ set pcolor blue ] ; water channel on the left
 end
 
 to setup-farmers
@@ -33,14 +36,19 @@ to setup-farmers
     set crop-stage random 5 ; crop stage is between 0 - 4 initially
     set crop-quality 0.8 + (random-float 0.4) ; crop quality is between 0.8 - 1.2 initially
     set total-land total-land + land-size ; update total for water division
-    setxy (1 + land-size / 2) (length farmer-order); place agent in the middle of their land in their corresponding row
-
+    setxy (1 + land-size / 2) (length farmer-order) ; place agent in the middle of their land in their corresponding row
     set farmer-order lput self farmer-order ; create ordering of farmers from bottom to top
+    set friendliness 0.5 + random-float 0.5 ; initial friendliness for social sharing
+    set social-credit 0 ; initial social credit
+  ]
+  ; assign random connections for social network
+  ask farmers [
+    set connections n-of (1 + random 3) other farmers
   ]
 end
 
 to-report my-land
-  report patches with [ pycor = [ycor] of myself and pxcor > 0 and pxcor <= [land-size] of myself ] ; update color of my farmland depending on how far along my crops are
+  report patches with [ pycor = [ycor] of myself and pxcor > 0 and pxcor <= [land-size] of myself ] ; update color of my farmland depending on crop stage
 end
 
 to update-land
@@ -48,30 +56,111 @@ to update-land
 end
 
 to go
+  set week week + 1
+  if week > 26 [ set week 1 ]
+  update-season
+  update-water-flow
   update-land
-  let water-per-acre (total-flow / total-land)
-  ask farmers [ set-farmer-water water-per-acre ]
-  ask farmers [ grow-crops ]
-  ;show [required-water] of farmers
+  allocate-water ; distribute water to farmers based on availability
+  share-water ; farmers request/share water with their connections
+  ask farmers [ grow-crops ] ; update crop growth and quality
   tick
 end
 
 to set-farmer-water [ water-per-acre ]
-  set available-water (land-size * water-per-acre)
-  set required-water (land-size * (item crop-stage crop-water-req))
-  ;show required-water
+  set available-water (land-size * water-per-acre) ; initial allocation based on land size
+  set required-water (land-size * (item crop-stage crop-water-req)) ; water needed for current crop stage
+end
+
+to allocate-water
+  let remaining-water total-flow ; total water available to distribute
+  foreach farmer-order [
+    f ->
+      let water-need ([land-size] of f * item [crop-stage] of f crop-water-req) ; water needed for this farmer's land & crop stage
+      let water-given min (list remaining-water water-need) ; cannot give more than remaining
+      let farmer-pos position f farmer-order  ; index in farmer-order (0 = upstream)
+      let loss-factor 1 - (0.05 * farmer-pos) ; kacha system loss based on upstream/downstream
+      set water-given water-given * loss-factor ; apply loss
+      ask f [
+        set available-water water-given
+        set required-water water-need
+      ]
+      set remaining-water remaining-water - water-given ; reduce water for next farmer
+  ]
+end
+
+to share-water
+  foreach farmer-order [
+    f ->
+      ask f [
+        let deficit required-water - available-water ; if water received is less than required
+        if deficit > 0 [
+          foreach sort connections [
+            conn ->
+              let donor-available [available-water] of conn ; water that the connected farmer can give
+              if donor-available > 0 [
+                let share-prob ([friendliness] of conn) * (0.1 + donor-available / [required-water] of conn) * (1 + (ln (1 + [social-credit] of conn) / 10))  ; probability donor agrees made it realsitc by adding natural log  its based on friendliness and social credits
+                set share-prob min (list 1 share-prob)  ; cap at 1
+                set share-prob min (list 1 share-prob)
+                set share-prob max (list 0 share-prob)
+
+                if random-float 1 < share-prob [
+                  let water-to-share min (list deficit donor-available (0.3 * donor-available)) ; actual water transferred maximum shared is 30%
+                  set available-water available-water + water-to-share
+                  set deficit deficit - water-to-share
+                  set friendliness friendliness + 0.03 * (1 - friendliness) ; increase friendliness slightly after receiving help
+                  ask conn [
+                    set available-water available-water - water-to-share
+                    set social-credit min (list 10 (social-credit + water-to-share)) ; donor gains social credit
+                    set friendliness friendliness + 0.03 * (1 - friendliness)
+                    if friendliness > 1 [ set friendliness 1 ]
+                  ]
+                ]
+
+                if random-float 1 >= share-prob [
+                  ask conn [
+                    set friendliness friendliness - 0.02 * friendliness ; donor slightly decreases friendliness if refused
+                    if friendliness < 0 [ set friendliness 0 ]
+                  ]
+                ]
+              ]
+          ]
+        ]
+      ]
+  ]
+
+  ask farmers [
+    set social-credit social-credit * 0.98 ; decay social credit slightly over time
+  ]
 end
 
 to grow-crops
-  let multiplier available-water / required-water ; quality multiplier based on how little or excess water we have
-  set multiplier max (list 0.8 (min (list multiplier 1.2))) ; clamp multiplier between 0.8 and 1.2
-  set crop-quality (multiplier * crop-quality) ; update crop quality based on how much water we gave
-  set crop-stage (crop-stage + 1) ; crops grow to next stage
+  let multiplier available-water / required-water ; quality multiplier based on water received
+  set multiplier max (list 0.8 (min (list multiplier 1.2))) ; clamp multiplier
+  set crop-quality (multiplier * crop-quality) ; update crop quality
+  set crop-stage (crop-stage + 1) ; advance crop stage
   if (crop-stage > 22) [
-    set wealth (wealth + (crop-quality * land-size))
+    set wealth (wealth + (crop-quality * land-size)) ; gain wealth from harvest
     set crop-stage 0
     set crop-quality 1
   ]
+end
+
+to update-season
+  if week = 1 [
+    ifelse season = "rabi" [set season "kharif"][set season "rabi"] ; switch season every 26 weeks
+  ]
+end
+
+to update-water-flow
+  if season = "kharif" [
+    set total-flow base-flow * 1.4 ; more water in kharif
+  ]
+  if season = "rabi" [
+    set total-flow base-flow * 0.6 ; less water in rabi
+  ]
+  set total-flow total-flow * (0.8 + random-float 0.4)  ; introduce fluctuation
+  if total-flow < 0 [ set total-flow 0 ]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -144,7 +233,7 @@ num-farmers
 num-farmers
 0
 33
-28.0
+29.0
 1
 1
 NIL
@@ -166,11 +255,11 @@ SLIDER
 122
 221
 155
-total-flow
-total-flow
+base-flow
+base-flow
 0
 500
-175.0
+500.0
 5
 1
 NIL
@@ -228,6 +317,60 @@ NIL
 NIL
 NIL
 1
+
+PLOT
+913
+430
+1153
+609
+Water Incoming
+Ticks
+Water Inflow
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot total-flow"
+
+PLOT
+1184
+20
+1384
+170
+Friendliness of Farmers
+Ticks
+Value
+0.0
+10.0
+0.0
+10.0
+true
+false
+"set-plot-y-range 0 1\n\n" ""
+PENS
+"Friendliness" 1.0 0 -8330359 true "" "if any? farmers [plot mean [friendliness] of farmers]"
+
+PLOT
+1195
+228
+1395
+378
+Social Credits of Farmers
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"Social credits" 1.0 0 -16777216 true "" "if any? farmers [ plotxy ticks mean [social-credit] of farmers ]"
 
 @#$#@#$#@
 ## WHAT IS IT?
