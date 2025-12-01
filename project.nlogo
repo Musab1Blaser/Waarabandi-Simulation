@@ -1,9 +1,15 @@
 ;========================
+; Libraries & Extensions
+;========================
+
+;========================
 ; GLOBALS AND BREEDS
 ;========================
 
 breed [ farmers farmer ]
-farmers-own [ land-size wealth crop-stage crop-quality available-water required-water friendliness connections social-credit theft-history last-stolen my-turn? predicted-water crop-type crop-water-profile]
+farmers-own [ land-size wealth crop-stage crop-quality available-water required-water friendliness social-credit theft-history last-stolen my-turn? predicted-water crop-type crop-water-profile]
+undirected-link-breed [ friendships friendship ]
+friendships-own [ water-a-to-b-balance strength ]
 globals [total-land farmer-order rice-req cotton-req wheat-req mustard-req week season total-flow total-thefts detected-thefts current-event last-flood? rainfall-factor growth-efficiency]
 
 ;========================
@@ -13,6 +19,7 @@ globals [total-land farmer-order rice-req cotton-req wheat-req mustard-req week 
 to setup
   clear-all
   reset-ticks
+  ;sr:setup ; SimpleR setup
   setup-patches
   setup-farmers
   set week 1
@@ -42,20 +49,49 @@ to setup-farmers
   set farmer-order []
   create-farmers num-farmers [
     set shape "person farmer" ; agent is a farmer
-    set land-size 4 + random 10 ; give random amount of land
-    set crop-stage random 5 ; crop stage is between 0 - 4 initially
-    set crop-quality 0.8 + (random-float 0.4) ; crop quality is between 0.8 - 1.2 initially
+    set land-size min(list 31 max(list 3 int exp (random-normal 1.5 0.8))) ; give random amount of land
+    set social-credit ln(land-size + 1) + random-float 0.5 ; my social standing depends on how much land I have
+    ;set land-size max(list 3 int (random-normal 10 5)) ; give random amount of land
+    ;set crop-stage random 5 ; crop stage is between 0 - 4 initially
+    ;set crop-quality 0.8 + (random-float 0.4) ; crop quality is between 0.8 - 1.2 initially
     set total-land total-land + land-size ; update total for water division
     setxy (1 + land-size / 2) (length farmer-order) ; place agent in the middle of their land in their corresponding row
     set farmer-order lput self farmer-order ; create ordering of farmers from bottom to top
-    set friendliness 0.5 + random-float 0.5 ; initial friendliness for social sharing
-    set social-credit 0 ; initial social credit
+    set friendliness random-float 1; initial friendliness for social sharing
     set theft-history []
   ]
-  ; assign random connections for social network
+
   ask farmers [
-    set connections n-of (1 + random 3) other farmers
+  ; 1. Spatial neighbor (ycor + 1)
+  let neighbor-farmer one-of farmers with [ycor = [ycor] of myself + 1 and not link-neighbor? myself]
+  if neighbor-farmer != nobody [
+    create-friendship-with neighbor-farmer [
+      set water-a-to-b-balance 0
+      set strength [friendliness] of end1 * [friendliness] of end2
+    ]
   ]
+
+  ;; 2. Similar social credit (2 closest)
+  let oth other turtles with [not member? self [who] of friendship-neighbors]
+    let sorted-list sort-by [ [a b] -> abs([social-credit] of a - [social-credit] of self) < abs([social-credit] of b - [social-credit] of self)] oth
+  let similar-sc sublist sorted-list 0 2
+  foreach similar-sc [ f ->
+    create-friendship-with f [
+      set water-a-to-b-balance 0
+      set strength [friendliness] of end1 * [friendliness] of end2
+    ]
+  ]
+
+  ;; 3. Random farmer (1)
+  let available-randoms other farmers with [not link-neighbor? myself]
+  if any? available-randoms [
+    create-friendship-with one-of available-randoms [
+      set water-a-to-b-balance 0
+      set strength [friendliness] of end1 * [friendliness] of end2
+    ]
+  ]
+]
+
 end
 
 to assign-crops
@@ -174,69 +210,102 @@ to update-water-flow
   if total-flow < 0 [ set total-flow 0 ]
 end
 
-to set-farmer-water [ water-per-acre ]
-  set available-water (land-size * water-per-acre) ; initial allocation based on land size
-  set required-water (land-size * (item crop-stage crop-water-profile)) ; water needed for current crop stage
-end
-
 to allocate-water
-  let remaining-water total-flow ; total water available to distribute
-  foreach farmer-order [
-    f ->
-      let water-need ([land-size] of f * item ([crop-stage] of f) ([crop-water-profile] of f)) ; water needed for this farmer's land & crop stage
-      let water-given min (list remaining-water water-need) ; cannot give more than remaining
-      let farmer-pos position f farmer-order  ; index in farmer-order (0 = upstream)
-      let loss-factor 1 - (0.05 * farmer-pos) ; kacha system loss based on upstream/downstream
-      set water-given water-given * loss-factor ; apply loss
-      ask f [
-        set available-water water-given
-        set required-water water-need
-        set predicted-water water-given ; predicted water is only initial allocation
-      ]
-      set remaining-water remaining-water - water-given ; reduce water for next farmer
+  let water-per-acre total-flow / total-land; total water available to distribute
+  ask farmers [
+    set required-water land-size * item crop-stage crop-water-profile ; water needed for this farmer's land & crop stage
+    let loss-factor 1 - (0.01 * ycor); more loss further downstream -> higher ycor. for 32 pos, 32% water loss
+    set available-water land-size * water-per-acre * (loss-factor + random-float 0.05) ; get water as per land (and loss w/ some randomness)
+    set predicted-water available-water ; I expect to receive as much as allocated
   ]
 end
 
 to share-water
-  foreach farmer-order [
-    f ->
-      ask f [
-        let deficit required-water - available-water  ; how much water this farmer still needs
-        if deficit > 0 [
-          foreach sort connections [
-            conn ->
-              let donor-available [available-water] of conn  ; water that the connected farmer can give
-              if donor-available > 0 [
-                ;; increase probability impact
-                let safe-social max list 0 [social-credit] of conn  ; ensure social-credit is non-negative
-                let share-prob ([friendliness] of conn) * (0.2 + donor-available / [required-water] of conn) * (1 + ln (1 + safe-social) / 5)  ; probability donor agrees, stronger influence than old version
-                set share-prob max list 0 (min list 1 share-prob)  ; cap between 0 and 1
-                if random-float 1 < share-prob [
-                  let water-to-share min (list deficit donor-available (0.5 * donor-available))  ; max 50% of donor's water shared
-                  set available-water available-water + water-to-share  ; recipient gains water
-                  set deficit deficit - water-to-share
-                  set friendliness friendliness + 0.1 * (1 - friendliness)  ; recipient friendliness increases more
-                  ask conn [
-                    set available-water available-water - water-to-share  ; donor loses water
-                    set social-credit min (list 10 (social-credit + water-to-share))  ; donor gains stronger social credit
-                    set friendliness friendliness + 0.05 * (1 - friendliness)  ; donor friendliness increases slightly
-                    if friendliness > 1 [ set friendliness 1 ]  ; cap friendliness at 1
-                  ]
-                ]
-                if random-float 1 >= share-prob [
-                  ask conn [
-                    set friendliness friendliness - 0.05 * friendliness  ; donor slightly decreases friendliness if refused
-                    if friendliness < 0 [ set friendliness 0 ]  ; prevent negative friendliness
-                  ]
-                ]
+  ask farmers [
+    let deficit required-water - available-water
+    if deficit <= 0 [ stop ]   ;; skip if no need
+
+    let available_ratio available-water / required-water
+    let a 8
+    let p_ask 1 / (1 + exp (- a * (1 - available_ratio))) ; low water -> high chance to ask
+
+    let cnt 0
+    let limit 5
+    while [ random-float 1 < p_ask and cnt < limit ] [
+      set cnt cnt + 1
+
+      let friend one-of friendship-neighbors
+      if friend != nobody [
+        ask friend [
+          ;; Determine how much I can give
+          let my-surplus available-water - required-water
+          if my-surplus < 0 [ set my-surplus 0 ]
+          let max-give my-surplus * 0.5  ;; never give more than half surplus
+
+          if max-give > 0 [
+            ;; get connection
+            let friend-link friendship ([who] of self) ([who] of myself)
+
+            ;; acceptance probability depends on:
+            ;; - my friendliness
+            ;; - strength of the tie
+            ;; - balance history
+            ;; - social credit of requester
+            let f  friendliness
+            let sc [social-credit] of myself
+            let str [strength] of friend-link
+            let bal [water-a-to-b-balance] of friend-link
+            ;show friend-link
+            if ([who] of self = [end1] of friend-link) [set bal (- bal) ]
+
+
+            ;; logistic acceptance probability
+            let p_accept 1 / (1 + exp (-(
+              2 * f            +   ;; friendly farmers give more
+              1.5 * str        +   ;; strong friendship
+              0.7 * bal        +   ;; positive trade history
+              1.0 * sc         +   ;; high-social-credit requester
+              1.5 * (deficit / [required-water] of myself) ;; urgent need
+            )))
+            ;show deficit
+            ;show p_accept
+
+            ifelse random-float 1 < p_accept [
+              ;show "accept"
+              ;; actual transfer amount
+              let amount min (list max-give deficit)
+
+              ;; donor gives
+              set available-water available-water - amount
+
+              ;; requester receives
+              ask myself [
+                set available-water available-water + amount
               ]
+
+              ;; update friendship
+              ask friend-link [
+                ifelse ([who] of myself = [end1] of friend-link) ; update balance in correct direction
+                [ set water-a-to-b-balance water-a-to-b-balance + amount ]
+                [ set water-a-to-b-balance water-a-to-b-balance - amount ]
+                set strength min(list 1 (strength + 0.1))
+              ]
+              set social-credit (social-credit + 0.1 * sc)
+            ]
+            [ ask friend-link [ set strength (strength * 0.95) ] ]
           ]
         ]
       ]
-  ]
-  ask farmers [ set social-credit social-credit * 0.99  ; slow decay so changes persist
+    set deficit required-water - available-water
+    if deficit <= 0 [ stop ]   ;; skip if no need
+
+    set available_ratio available-water / required-water
+    set p_ask 1 / (1 + exp (- a * (1 - available_ratio))) ; low water -> high chance to ask
+    ]
   ]
 end
+
+
 
 ;========================
 ; THEFT
@@ -358,6 +427,11 @@ to update-season
     set last-flood? false  ; clear flood flag after applying bonus
   ]
 end
+
+
+;========================
+; Helpers
+;========================
 @#$#@#$#@
 GRAPHICS-WINDOW
 438
@@ -429,7 +503,7 @@ num-farmers
 num-farmers
 0
 33
-30.0
+33.0
 1
 1
 NIL
@@ -455,7 +529,7 @@ base-flow
 base-flow
 0
 500
-40.0
+50.0
 5
 1
 NIL
@@ -586,6 +660,35 @@ false
 PENS
 "Total Thefts" 1.0 0 -13791810 true "" "plot total-thefts\n\n"
 "Detected Thefts" 1.0 0 -2674135 true "" "plot detected-thefts"
+
+MONITOR
+51
+181
+249
+226
+friendship strength
+mean [strength] of friendships
+17
+1
+11
+
+PLOT
+1522
+151
+1808
+512
+Friendship Balance
+NIL
+NIL
+-10.0
+10.0
+0.0
+400.0
+true
+false
+"" ""
+PENS
+"default" 0.1 1 -16777216 true "" "histogram [water-a-to-b-balance] of friendships"
 
 @#$#@#$#@
 ## WHAT IS IT?
