@@ -10,7 +10,7 @@ breed [ farmers farmer ]
 farmers-own [ land-size wealth crop-stage crop-quality available-water required-water friendliness social-credit theft-history last-stolen my-turn? predicted-water crop-type crop-water-profile]
 undirected-link-breed [ friendships friendship ]
 friendships-own [ water-a-to-b-balance strength ]
-globals [total-land farmer-order rice-req cotton-req wheat-req mustard-req week season total-flow total-thefts detected-thefts current-event last-flood? rainfall-factor growth-efficiency]
+globals [total-land farmer-order rice-req cotton-req wheat-req mustard-req week season total-flow total-thefts detected-thefts current-event last-flood? rainfall-factor growth-efficiency total-trades]
 
 ;========================
 ; SETUP FUNCTIONS
@@ -22,7 +22,9 @@ to setup
   ;sr:setup ; SimpleR setup
   setup-patches
   setup-farmers
+  setup-friendships
   set week 1
+  set total-trades 0
   set total-thefts 0
   set detected-thefts 0
   set season "rabi"
@@ -61,6 +63,9 @@ to setup-farmers
     set theft-history []
   ]
 
+end
+
+to setup-friendships
   ask farmers [
   ; 1. Spatial neighbor (ycor + 1)
   let neighbor-farmer one-of farmers with [ycor = [ycor] of myself + 1 and not link-neighbor? myself]
@@ -90,8 +95,11 @@ to setup-farmers
       set strength [friendliness] of end1 * [friendliness] of end2
     ]
   ]
-]
+  ]
 
+  ask friendships [
+    set color scale-color red (abs water-a-to-b-balance) 1 0
+  ]
 end
 
 to assign-crops
@@ -258,15 +266,16 @@ to share-water
             ;show friend-link
             if ([who] of self = [end1] of friend-link) [set bal (- bal) ]
 
-
-            ;; logistic acceptance probability
-            let p_accept 1 / (1 + exp (-(
-              2 * f            +   ;; friendly farmers give more
-              1.5 * str        +   ;; strong friendship
-              0.7 * bal        +   ;; positive trade history
-              1.0 * sc         +   ;; high-social-credit requester
-              1.5 * (deficit / [required-water] of myself) ;; urgent need
-            )))
+            ;; logistic acceptance probability -> each parameter normalised to -1 to 1
+            let accept-factor (
+              base-accept              + ;; don't give water if no real need
+              w_f * 2 * (f - 0.5)            +   ;; friendly farmers give more
+              w_s * 2 * (str - 0.5)        +   ;; strong friendship
+              w_bal * bal        +   ;; positive trade history
+              w_sc * 0.1 * sc         +   ;; high-social-credit requester
+              w_def * 1 * (deficit / [required-water] of myself) ;; urgent need
+            )
+            let p_accept 1 / (1 + exp (-(accept-factor)))
             ;show deficit
             ;show p_accept
 
@@ -289,6 +298,8 @@ to share-water
                 [ set water-a-to-b-balance water-a-to-b-balance + amount ]
                 [ set water-a-to-b-balance water-a-to-b-balance - amount ]
                 set strength min(list 1 (strength + 0.1))
+                set color scale-color red (abs water-a-to-b-balance) 1 0
+                set total-trades (total-trades + 1)
               ]
               set social-credit (social-credit + 0.1 * sc)
             ]
@@ -662,10 +673,10 @@ PENS
 "Detected Thefts" 1.0 0 -2674135 true "" "plot detected-thefts"
 
 MONITOR
-51
-181
-249
-226
+36
+168
+234
+213
 friendship strength
 mean [strength] of friendships
 17
@@ -673,15 +684,15 @@ mean [strength] of friendships
 11
 
 PLOT
-1522
-151
-1808
-512
+1448
+139
+1734
+500
 Friendship Balance
 NIL
 NIL
--10.0
-10.0
+-1.0
+1.0
 0.0
 400.0
 true
@@ -689,6 +700,107 @@ false
 "" ""
 PENS
 "default" 0.1 1 -16777216 true "" "histogram [water-a-to-b-balance] of friendships"
+
+SLIDER
+50
+543
+222
+576
+w_f
+w_f
+0
+3
+1.5
+0.1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+46
+674
+218
+707
+w_sc
+w_sc
+0
+3
+2.0
+0.1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+48
+584
+220
+617
+w_s
+w_s
+0
+3
+2.0
+0.1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+47
+628
+219
+661
+w_bal
+w_bal
+0
+3
+1.0
+0.1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+46
+718
+218
+751
+w_def
+w_def
+0
+3
+1.5
+0.1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+49
+499
+221
+532
+base-accept
+base-accept
+-5
+5
+3.0
+0.1
+1
+NIL
+HORIZONTAL
+
+MONITOR
+73
+238
+156
+283
+NIL
+total-trades
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
