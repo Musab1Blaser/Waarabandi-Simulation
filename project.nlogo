@@ -463,18 +463,24 @@ to detect-thefts
       set friendliness (friendliness * 0.9)
       ; set wealth wealth - 10
       let thieves my-in-thefts
-      set detected-thefts detected-thefts + count thieves
-      ifelse count thieves != 0
-      [ set suspicion-threshold max(list 0.02 (suspicion-threshold - (0.01 * count thieves))) ] ; if there are thieves, my threshold reduces
+
+      if count thieves = 0
       [ set suspicion-threshold min(list 0.5 (suspicion-threshold + 0.01)) ] ; if there are no thieves, my threshold rises
 
       ask thieves [
-        ask end2 [ set available-water available-water + [amount-stolen] of myself ]
-        ask end1 [
-          set available-water available-water - [amount-stolen] of myself
-          set social-credit max(list -10 (social-credit - 0.1 * [social-credit] of [end1] of myself))
+        if random-float 1 < detection-likelihood [
+          set detected-thefts detected-thefts + 1
+
+          ask end2 [
+            set available-water available-water + [amount-stolen] of myself
+            set suspicion-threshold max(list 0.02 (suspicion-threshold - 0.01)) ; if there are thieves, my threshold reduces
+          ]
+          ask end1 [
+            set available-water available-water - [amount-stolen] of myself
+            set social-credit max(list -10 (social-credit - 0.1 * [social-credit] of [end1] of myself))
+          ]
+          set color green
         ]
-        set color green
       ]
     ]
   ]
@@ -960,7 +966,7 @@ base-theft
 base-theft
 -20
 20
--7.0
+-4.0
 0.1
 1
 NIL
@@ -1118,6 +1124,21 @@ crop-stage-variance
 10
 4.0
 1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+298
+459
+480
+492
+detection-likelihood
+detection-likelihood
+0
+1
+0.5
+0.05
 1
 NIL
 HORIZONTAL
