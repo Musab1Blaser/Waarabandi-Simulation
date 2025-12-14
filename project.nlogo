@@ -8,7 +8,7 @@
 
 breed [ farmers farmer ]
 farmers-own [ land-size wealth crop-stage crop-quality available-water required-water friendliness social-credit theft-history last-stolen my-turn? predicted-water crop-type crop-water-profile shared-now stolen-now suspicion-threshold
-              seed-cost maintenance-cost harvest-price total-cost revenue profit p-steal-base share-aggressiveness current-strategy living-cost ] ; added crop economic variables & farmer strategy
+              seed-cost maintenance-cost harvest-price total-cost revenue profit p-steal-base share-aggressiveness current-strategy living-cost times-robbed num-trades num-shares crops-used strategies-used ] ; added crop economic variables & farmer strategy
 
 undirected-link-breed [ friendships friendship ]
 friendships-own [ water-a-to-b-balance strength ]
@@ -47,7 +47,8 @@ to setup
   set growth-efficiency 1.0
   assign-crops ; assign initial crops based on season
   update-land ; mark farmland based on crop stage
-
+  show-wealth
+  show-social-credit
 end
 
 to setup-patches
@@ -73,6 +74,10 @@ to setup-farmers
     set farmer-order lput self farmer-order ; create ordering of farmers from bottom to top
     set friendliness random-float 1; initial friendliness for social sharing
     set theft-history []
+    set times-robbed 0
+    set num-trades 0
+    set crops-used n-values 4 [ 0 ]
+    set strategies-used n-values 4 [ 0 ]
     set wealth land-size * 20000
   ]
 
@@ -218,24 +223,36 @@ to apply-crop-attributes [chosen-crop]
     set seed-cost rice-seed-cost + random-float (0.2 * rice-seed-cost)
     set maintenance-cost base-maintenance-cost + random-float 2000
     set harvest-price rice-price
+    let tmp item 0 crops-used
+    set tmp tmp + 1
+    set crops-used replace-item 0 crops-used tmp
   ]
   if chosen-crop = "cotton" [
     set crop-water-profile cotton-req
     set seed-cost cotton-seed-cost + random-float (0.2 * cotton-seed-cost)
     set maintenance-cost 2 * base-maintenance-cost + random-float 3000
     set harvest-price cotton-price
+    let tmp item 1 crops-used
+    set tmp tmp + 1
+    set crops-used replace-item 1 crops-used tmp
   ]
   if chosen-crop = "wheat" [
     set crop-water-profile wheat-req
     set seed-cost wheat-seed-cost + random-float (0.3 * wheat-seed-cost)
     set maintenance-cost base-maintenance-cost + random-float 1000
     set harvest-price wheat-price
+    let tmp item 2 crops-used
+    set tmp tmp + 1
+    set crops-used replace-item 2 crops-used tmp
   ]
   if chosen-crop = "mustard" [
     set crop-water-profile mustard-req
     set seed-cost mustard-seed-cost + random-float (0.1 * mustard-seed-cost)
     set maintenance-cost 0.5 * base-maintenance-cost + random-float 500
     set harvest-price mustard-price
+    let tmp item 3 crops-used
+    set tmp tmp + 1
+    set crops-used replace-item 3 crops-used tmp
   ]
 
   ; Final Cost Calculation and Deduction (Done ONLY ONCE)
@@ -339,6 +356,10 @@ to go
   detect-thefts ; check for thefts
   update-friendships
   ask farmers [ grow-crops ] ; update crop growth and quality
+  show-wealth
+  show-social-credit
+  show-robbed
+  show-shares
   tick
 end
 
@@ -473,6 +494,7 @@ to share-water
           set available-water available-water + amount-to-get
           ask friend [ set available-water available-water - amount-to-get ]
           set deficit required-water - available-water
+          set num-trades num-trades + 1
         ]
         ;; otherwise buy water (price scaled by friend's land size)
          [
@@ -487,6 +509,7 @@ to share-water
             set deficit required-water - available-water
             set total-trades total-trades + 1
             set trade-volume trade-volume + amount-to-buy
+            set num-trades num-trades + 1
           ]
         ]
       ]
@@ -547,16 +570,16 @@ to share-water
               ;; 2. Requester (myself) receives water and updates shared-now (Positive)
               ask myself [
                 set available-water available-water + amount
-                set shared-now shared-now + amount ; ***FIXED: Now adds amount received***
+                set num-shares num-shares + 1
               ]
 
               ;; 3. Handle Payment (Unified Payment Logic)
-              if str < 0.95 [
-                let price-per-acre base-water-cost-per-unit
-                let cost amount * price-per-acre * [land-size] of self ; Cost based on friend's land size
-                ask myself [ set wealth wealth - cost ] ; Requester (myself) pays
-                set wealth wealth + cost ; Donor (friend) receives payment
-              ]
+              ;if str < 0.95 [
+              ;  let price-per-acre base-water-cost-per-unit
+              ;  let cost amount * price-per-acre * [land-size] of self ; Cost based on friend's land size
+              ;  ask myself [ set wealth wealth - cost ] ; Requester (myself) pays
+              ;  set wealth wealth + cost ; Donor (friend) receives payment
+              ;]
 
               ;; 4. Update friendship link and social metrics
               ask friend-link [
@@ -566,6 +589,7 @@ to share-water
                 set strength min (list 1 (strength + 0.1))
                 set color scale-color red (abs water-a-to-b-balance) 1 0
                 set total-trades total-trades + 1
+
                 set trade-volume trade-volume + amount
               ]
               ask myself [ set social-credit (social-credit + 0.3) ]
@@ -671,6 +695,7 @@ to attempt-theft
             ask victim [
               set available-water available-water - amount
               set stolen-now stolen-now - amount
+              set times-robbed times-robbed + 1
             ]
 
             ;; update friendship tie
@@ -722,10 +747,10 @@ to detect-thefts
       if est-water > 0 [
         if (my-water / est-water) < (1 - suspicion-threshold - size-suspicion) [
           set total-theft-checks total-theft-checks + 1
-          set friendliness friendliness * 0.9
+          set friendliness friendliness * 0.95
 
           ;; cost of inquiry
-          let inquiry-cost 10
+          let inquiry-cost 5000
           set wealth wealth - inquiry-cost
 
           ;; check for incoming theft links (where myself is the victim)
@@ -738,6 +763,7 @@ to detect-thefts
           ; ***FIXED LOGIC: Iterate over theft links where self is the victim (my-in-thefts)***
           foreach theft-links-list [
             t-link ->
+            if random-float 1 < detection-likelihood [
               ;; t-link: end1 (thief) -> end2 (victim, which is myself)
               let stolen-amount [amount-stolen] of t-link
               let thief [end1] of t-link
@@ -745,6 +771,8 @@ to detect-thefts
 
               ;; 1. Return stolen water to victim (myself)
               set available-water available-water + stolen-amount
+              set times-robbed times-robbed - 1
+              set theft-volume theft-volume - stolen-amount
               set suspicion-threshold max (list 0.02 (suspicion-threshold - 0.01)) ; reward for successful detection
 
               ;; 2. Punish thief (Updated Economic Penalty)
@@ -760,6 +788,7 @@ to detect-thefts
 
               ;; 4. Delete the link to clear the theft from display/history for this tick
               ask t-link [ die ]
+            ]
           ]
         ]
       ]
@@ -769,7 +798,7 @@ end
 
 
 to delete-thefts
-  wait 0.1
+  ;wait 0.1
   ask thefts [ die ]
 end
 
@@ -792,7 +821,7 @@ to grow-crops
   set crop-stage crop-stage + multiplier * growth-efficiency  ; advance crop stage -> based on how much water given
   if 1 + crop-stage >= length crop-water-profile [  ; check if crop reached final stage
     set revenue crop-quality * land-size * 40 * harvest-price ; calculate revenue (Yield 40 units/acre * Price). Removed /40.
-    show "harvested"
+    ;show "harvested"
     set profit revenue - total-cost ; calculate profit after seed + maintenance costs
     set wealth wealth + revenue ; add revenue to wealth
   ]
@@ -805,7 +834,7 @@ to update-season
     ; This single call now handles ALL crop assignment, strategic choice,
     ; cost deduction, and initial growth variable setup.
     assign-crops
-    show "assigned"
+    ;show "assigned"
 
     ask farmers [
       if last-flood? [set crop-quality crop-quality * 1.1]  ; apply flood fertility bonus if last season had flood
@@ -912,6 +941,75 @@ to update-strategy
     ; Default behavior for medium wealth/low deficit is the baseline set above.
   ]
 
+  if current-strategy = "Baseline"
+  [
+    let tmp item 0 strategies-used
+    set tmp tmp + 1
+    set strategies-used replace-item 0 strategies-used tmp
+  ]
+  if current-strategy = "Poor/High-Risk"
+  [
+    let tmp item 1 strategies-used
+    set tmp tmp + 1
+    set strategies-used replace-item 1 strategies-used tmp
+  ]
+  if current-strategy = "Buy/Trade-Aggressive"
+  [
+    let tmp item 2 strategies-used
+    set tmp tmp + 1
+    set strategies-used replace-item 2 strategies-used tmp
+  ]
+  if current-strategy = "Social-Investment"
+  [
+    let tmp item 3 strategies-used
+    set tmp tmp + 1
+    set strategies-used replace-item 3 strategies-used tmp
+  ]
+end
+
+to show-wealth
+  let m mean [wealth] of farmers
+  let s standard-deviation [wealth] of farmers
+  ask farmers [
+    let k (wealth - m) / s
+    ask patch 30 ycor [
+      ifelse (k > 0) [ set pcolor scale-color green k -3 8]
+      [ set pcolor scale-color red k -8 3]
+    ]
+  ]
+end
+
+to show-social-credit
+  let m mean [social-credit] of farmers
+  let s standard-deviation [social-credit] of farmers
+  ask farmers [
+    let k (social-credit - m) / s
+    ask patch 31 ycor [
+      ifelse (k > 0) [ set pcolor scale-color green k -3 8]
+      [ set pcolor scale-color red k -8 3]
+    ]
+  ]
+end
+
+to show-robbed
+  let m sum [times-robbed] of farmers
+  if m = 0 [ stop ]
+  let s standard-deviation [times-robbed] of farmers
+  ask farmers [
+    let k times-robbed / s
+    ask patch 32 ycor [ set pcolor scale-color orange k 0 5]
+  ]
+end
+
+
+to show-shares
+  let m sum [num-trades + num-shares] of farmers
+  if m = 0 [ stop ]
+  let s standard-deviation [num-trades + num-shares] of farmers
+  ask farmers [
+    let k (num-trades + num-shares) / s
+    ask patch 33 ycor [ set pcolor scale-color blue k 0 5]
+  ]
 end
 
 ;========================
@@ -949,12 +1047,33 @@ to-report gini [vals]
 
   report ( (2 * weighted-sum) / (n * sum sorted) - (n + 1) / n )
 end
+
+to-report report-individual-farmer-data [f]
+  report (list
+      [ycor] of f           ; Location on the y-axis
+      [land-size] of f      ; Land attribute
+      [wealth] of f         ; Wealth attribute
+      [social-credit] of f  ; Social credit attribute
+      [times-robbed] of f   ; Robbing history
+      [num-trades + num-shares] of f     ; Share counts
+      [crops-used] of f     ; List/string of crops
+      [strategies-used] of f; List/string of strategies
+    )
+end
+
+; For behaviorspace
+to-report report-all-farmer-data
+  let farmer-list sort-by [ [f1 f2] -> [ycor] of f1 < [ycor] of f2 ] farmers
+  report map [
+    f -> report-individual-farmer-data f
+  ] farmer-list
+end
 @#$#@#$#@
 GRAPHICS-WINDOW
-487
-13
-1072
-599
+479
+17
+1082
+603
 -1
 -1
 17.5
@@ -968,7 +1087,7 @@ GRAPHICS-WINDOW
 0
 1
 0
-32
+33
 0
 32
 0
@@ -1340,7 +1459,7 @@ base-theft
 base-theft
 -20
 20
-1.0
+-1.0
 0.1
 1
 NIL
@@ -1477,10 +1596,10 @@ mean [friendliness] of farmers
 11
 
 MONITOR
-287
-259
-392
-304
+296
+257
+401
+302
 NIL
 total-theft-checks
 17
@@ -1488,10 +1607,10 @@ total-theft-checks
 11
 
 SLIDER
-259
-169
-433
-202
+238
+162
+412
+195
 crop-stage-variance
 crop-stage-variance
 0
@@ -1511,7 +1630,7 @@ detection-likelihood
 detection-likelihood
 0
 1
-0.4
+0.75
 0.05
 1
 NIL
@@ -1752,7 +1871,7 @@ true
 false
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot standard-deviation [wealth] of farmers"
+"default" 1.0 0 -16777216 true "" "if sum [wealth] of farmers > 0 [ plot standard-deviation [wealth] of farmers ]"
 
 PLOT
 1341
@@ -1833,10 +1952,10 @@ NIL
 HORIZONTAL
 
 MONITOR
-412
-265
-469
-310
+419
+208
+476
+253
 NIL
 season
 17
@@ -1844,35 +1963,46 @@ season
 11
 
 MONITOR
-300
-374
-456
-419
-NIL
+286
+363
+367
+408
+min wealth
 min [wealth] of farmers
 0
 1
 11
 
 MONITOR
-300
-419
-458
-464
-NIL
+378
+364
+460
+409
+max wealth
 max [wealth] of farmers
 0
 1
 11
 
 MONITOR
-306
-316
-445
-361
+287
+310
+426
+355
 NIL
 dropped-friendships
 17
+1
+11
+
+MONITOR
+329
+416
+410
+461
+avg wealth
+mean [wealth] of farmers
+0
 1
 11
 
@@ -2239,6 +2369,116 @@ NetLogo 6.4.0
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
+<experiments>
+  <experiment name="standard" repetitions="200" runMetricsEveryStep="false">
+    <setup>setup</setup>
+    <go>go</go>
+    <metric>total-land</metric>
+    <metric>mean [wealth] of farmers</metric>
+    <metric>standard-deviation [wealth] of farmers</metric>
+    <metric>theft-volume</metric>
+    <metric>trade-volume</metric>
+    <metric>mean [strength] of friendships</metric>
+    <metric>mean [social-credit] of farmers</metric>
+    <metric>report-all-farmer-data</metric>
+    <enumeratedValueSet variable="rice-seed-cost">
+      <value value="5300"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="drought-prob">
+      <value value="0.05"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-maintenance-cost">
+      <value value="80000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_sc">
+      <value value="1.9"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_def">
+      <value value="1.5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-share">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="num-farmers">
+      <value value="33"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_bal">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-theft">
+      <value value="-1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="detection-likelihood">
+      <value value="0.75"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="cotton-price">
+      <value value="9200"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="mustard-price">
+      <value value="6000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_vwater">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="crop-stage-variance">
+      <value value="4"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_f">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wheat-price">
+      <value value="3500"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_str">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="cotton-seed-cost">
+      <value value="8400"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="heavy-rain-prob">
+      <value value="0.05"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="rice-price">
+      <value value="4700"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-living-cost-month">
+      <value value="20000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_sc">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_f">
+      <value value="1.5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="mustard-seed-cost">
+      <value value="1300"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="flood-prob">
+      <value value="0.01"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_vsc">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-flow">
+      <value value="160"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_str">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wheat-seed-cost">
+      <value value="5800"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="water-randomness">
+      <value value="0.1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-water-cost-per-unit">
+      <value value="600"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_def">
+      <value value="1.5"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
 @#$#@#$#@
 @#$#@#$#@
 default
