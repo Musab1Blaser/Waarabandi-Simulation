@@ -746,7 +746,7 @@ to detect-thefts
           let theft-links-list sort my-in-thefts
 
           if empty? theft-links-list [
-            ;; No theft detected, increase paranoia (suspicion threshold)
+            ;; No theft detected, decrease paranoia (suspicion threshold)
             set suspicion-threshold min (list 0.5 (suspicion-threshold + 0.01))
           ]
           ; ***FIXED LOGIC: Iterate over theft links where self is the victim (my-in-thefts)***
@@ -762,7 +762,7 @@ to detect-thefts
               set available-water available-water + stolen-amount
               set times-robbed times-robbed - 1
               set theft-volume theft-volume - stolen-amount
-              set suspicion-threshold max (list 0.02 (suspicion-threshold - 0.01)) ; reward for successful detection
+              set suspicion-threshold max (list 0.02 (suspicion-threshold - 0.01)) ; increase paranoia
 
               ;; 2. Punish thief (Updated Economic Penalty)
               let economic-penalty base-water-cost-per-unit * stolen-amount * (2 + [land-size] of thief / 10)
@@ -923,7 +923,7 @@ to update-strategy
       set p-steal-base base-theft - 2 ; Min Theft Risk
       set share-aggressiveness -0.5 ; Less aggressive asking, more focus on GIVING (implied)
       set friendliness min(list 1 (friendliness + 0.02)) ; High Social Investment
-      set suspicion-threshold max(list 0.05 (suspicion-threshold - 0.01)) ; Reduced paranoia
+      set suspicion-threshold max(list 0.05 (suspicion-threshold + 0.01)) ; reduced paranoia
       set current-strategy "Social-Investment" ; <-- NEW
     ]
     ; Default behavior for medium wealth/low deficit is the baseline set above.
@@ -1151,7 +1151,7 @@ SLIDER
 155
 base-flow
 base-flow
-0
+50
 500
 160.0
 5
@@ -1445,8 +1445,8 @@ SLIDER
 565
 base-theft
 base-theft
--20
-20
+-5
+5
 -1.0
 0.1
 1
@@ -1565,7 +1565,7 @@ SLIDER
 water-randomness
 water-randomness
 0
-1
+0.4
 0.1
 0.1
 1
@@ -1602,7 +1602,7 @@ SLIDER
 crop-stage-variance
 crop-stage-variance
 0
-10
+8
 4.0
 1
 1
@@ -1616,7 +1616,7 @@ SLIDER
 529
 detection-likelihood
 detection-likelihood
-0
+0.1
 1
 0.75
 0.05
@@ -1650,7 +1650,7 @@ SLIDER
 wheat-price
 wheat-price
 3000
-4000
+7600
 3500.0
 100
 1
@@ -1664,8 +1664,8 @@ SLIDER
 702
 mustard-price
 mustard-price
-5000
-7000
+1000
+6500
 6000.0
 100
 1
@@ -1680,7 +1680,7 @@ SLIDER
 rice-price
 rice-price
 4000
-5000
+7000
 4700.0
 100
 1
@@ -1694,8 +1694,8 @@ SLIDER
 792
 cotton-price
 cotton-price
-7000
-10500
+5000
+14000
 9200.0
 100
 1
@@ -1709,8 +1709,8 @@ SLIDER
 663
 wheat-seed-cost
 wheat-seed-cost
-5000
-8500
+3000
+7600
 5800.0
 100
 1
@@ -1725,7 +1725,7 @@ SLIDER
 mustard-seed-cost
 mustard-seed-cost
 1000
-2000
+6500
 1300.0
 100
 1
@@ -1739,8 +1739,8 @@ SLIDER
 748
 rice-seed-cost
 rice-seed-cost
-3500
-7500
+4000
+7000
 5300.0
 100
 1
@@ -1754,8 +1754,8 @@ SLIDER
 793
 cotton-seed-cost
 cotton-seed-cost
-4000
-15000
+5000
+14000
 8400.0
 100
 1
@@ -1769,7 +1769,7 @@ SLIDER
 662
 base-maintenance-cost
 base-maintenance-cost
-60000
+50000
 150000
 80000.0
 10000
@@ -1887,7 +1887,7 @@ SLIDER
 flood-prob
 flood-prob
 0
-1
+0.1
 0.01
 0.01
 1
@@ -1902,7 +1902,7 @@ SLIDER
 heavy-rain-prob
 heavy-rain-prob
 0
-1 - flood-prob
+0.2
 0.05
 0.01
 1
@@ -1912,12 +1912,12 @@ HORIZONTAL
 SLIDER
 279
 214
-410
+451
 247
 drought-prob
 drought-prob
 0
-1 - flood-prob - heavy-rain-prob
+0.25
 0.05
 0.01
 1
@@ -1927,12 +1927,12 @@ HORIZONTAL
 SLIDER
 879
 711
-1089
+1095
 744
 base-living-cost-month
 base-living-cost-month
-0
-100000
+10000
+60000
 20000.0
 1000
 1
@@ -2779,6 +2779,109 @@ NetLogo 6.4.0
     </enumeratedValueSet>
     <enumeratedValueSet variable="base-water-cost-per-unit">
       <value value="700"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_def">
+      <value value="1.5"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="transient" repetitions="100" sequentialRunOrder="false" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <metric>ticks</metric>
+    <metric>mean [friendliness] of farmers</metric>
+    <metric>mean [social-credit] of farmers</metric>
+    <enumeratedValueSet variable="rice-seed-cost">
+      <value value="5300"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="drought-prob">
+      <value value="0.05"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-maintenance-cost">
+      <value value="80000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_sc">
+      <value value="1.9"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_def">
+      <value value="1.5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-share">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="num-farmers">
+      <value value="33"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_bal">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-theft">
+      <value value="-1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="detection-likelihood">
+      <value value="0.75"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="cotton-price">
+      <value value="9200"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="mustard-price">
+      <value value="6000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_vwater">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="crop-stage-variance">
+      <value value="4"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_f">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wheat-price">
+      <value value="3500"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_str">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="cotton-seed-cost">
+      <value value="8400"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="heavy-rain-prob">
+      <value value="0.05"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="rice-price">
+      <value value="4700"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-living-cost-month">
+      <value value="20000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_sc">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="w_f">
+      <value value="1.5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="mustard-seed-cost">
+      <value value="1300"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="flood-prob">
+      <value value="0.01"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_vsc">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-flow">
+      <value value="160"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="theft_w_str">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="wheat-seed-cost">
+      <value value="5800"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="water-randomness">
+      <value value="0.1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="base-water-cost-per-unit">
+      <value value="600"/>
     </enumeratedValueSet>
     <enumeratedValueSet variable="theft_w_def">
       <value value="1.5"/>
